@@ -9,4 +9,4 @@ Screenshots:
 <img src="./screenshot/Home_Of_Art_3.png" alt="Search page result with keyword being Van Gogh" width="700" />
 <br><br>
 
-To run the project, direct to `.../2 Use Public API`, still run `npm i` in the terminal. After all packages are installed, run `node index.js`, and enter `localhost:3000` in your browser.
+To run the project, run `npm i` in the terminal under the root repository. After all packages are installed, run `node index.js`, and enter `localhost:3000` in your browser.
