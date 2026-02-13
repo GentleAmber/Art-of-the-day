@@ -153,6 +153,10 @@ const departments = [
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
+app.get("/healthz", (req, res) => {
+  res.status(200).send("OK");
+});
+
 app.get("/", async (req, res) => {
 
   try {
