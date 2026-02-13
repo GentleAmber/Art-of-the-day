@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import axios from "axios";
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 const API_URL = "https://collectionapi.metmuseum.org";
 const objectsWithImages = [
   56616, 47867, 47724, 42365, 170490, 89513, 193964, 193963, 193739, 467344,
