@@ -1,6 +1,7 @@
 <%- include("partials/header.ejs") %>
 
 <div class="container">
+  <div><p>Due to API behavior, please only input 1 field for each search.</p></div>
   <form novalidate="" action="/search" method="post" id="searchForm">
     <div class="row g-3">
       <div class="col-sm-4">
@@ -38,30 +39,6 @@
         </select>
       </div>
       
-      <!-- <div class="col-md-3">
-        <label for="startYear" class="form-label">Start Year</label>
-          <input 
-            type="text"
-            class="form-control col-md-2 yearInput"
-            id="startYear" name="startYear"
-            placeholder=""
-            required=""
-          />
-        <label for="startYear" class="form-label">Must be integer. e.g. -100 - 200 (100 B.C. to 200 A.D.)</label>
-        <div id="yearIntegerError" class="text-danger mt-1 d-none">Years must be integers</div>
-      </div>
-      <div class="col-md-3">
-        <label for="endYear" class="form-label">End Year</label>
-          <input 
-            type="text"
-            class="form-control col-md-2 yearInput"
-            id="endYear" name="endYear"
-            placeholder=""
-            required=""
-          />
-        <div id="negativeError" class="text-danger mt-1 d-none">End year cannot be earlier than start year</div>
-      </div>
-    </div> -->
     <hr />
     
     <button class="w-100 btn btn-primary btn-lg my-4" type="submit"
@@ -71,37 +48,5 @@
   </form>
   
 </div>
-
-<!-- <script>
-  // Number.isInteger()
-  const form = $("#searchForm");
-  const submitButton = $("#submitButton");
-  const yearIntegerError = $("#yearIntegerError");
-  const yearDifferenceNegativeError = $("#negativeError");
-
-  submitButton.on('click', function() {
-      var ifValid = true;
-
-      if (!Number.isInteger(startYearValue) || !Number.isInteger(endYearValue)) {
-        yearIntegerError.removeClass('d-none');
-        ifValid = false;
-      } else {
-        yearIntegerError.addClass('d-none');
-      }
-
-      if (endYearValue - startYearValue < 0) {
-        yearDifferenceNegativeError.removeClass('d-none');
-        ifValid = false;
-      } else {
-        yearDifferenceNegativeError.addClass('d-none');
-      }
-
-      // After validation, submit the form  
-      if (ifValid) {
-        form.submit();
-      }
-    });
-
-</script> -->
 
 <%- include("partials/footer.ejs") %>

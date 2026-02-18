@@ -1,8 +1,16 @@
 import express from "express";
 import bodyParser from "body-parser";
 import axios from "axios";
+import rateLimit from 'express-rate-limit';
+
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 16, // limit each IP to 25 requests per windowMs
+  message: 'Too many requests, please try again later.'
+});
 
 const app = express();
+app.use(limiter);
 const port = process.env.PORT || 3000;
 const API_URL = "https://collectionapi.metmuseum.org";
 const imageLinks = [
@@ -88,9 +96,6 @@ const departments = [
   },
 ];
 
-// Used to store queried object so that they can be directly fetched from here rather than queried again
-const queriedObject = new Map();
-
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
@@ -115,13 +120,13 @@ app.post("/search", (req, res) => {
   }
   */
   const params = new URLSearchParams({
-    artist: req.body.artist || '',
-    objectMatter: req.body.objectMatter || '',
-    department: req.body.department || '',
+    artist: req.body.artist?.toString().slice(0, 60) || '',
+    objectMatter: req.body.objectMatter?.toString().slice(0, 60) || '',
+    department: req.body.department?.toString().slice(0, 3) || '',
     page: '1'
   });
   
-  res.redirect(`/result?${params.toString()}`);
+  res.redirect(`/result?${params}`);
   
 });
 
@@ -129,6 +134,52 @@ app.get("/search", (req, res) => {
   const data = { departments: departments };
   res.render("search.ejs", data); // Render a search form
 });
+
+// Used to store queried objectIDs so that they can be directly fetched from here rather than queried again
+class LimitedMap {
+  constructor(maxSize = 5) {
+    this.maxSize = maxSize;
+    this.map = new Map();
+    this.keys = []; // Track insertion order
+  }
+
+  set(key, value) {
+    // If key already exists, remove it from keys array first
+    if (this.map.has(key)) {
+      const index = this.keys.indexOf(key);
+      this.keys.splice(index, 1);
+    }
+
+    // If max size is reached, remove the oldest entry
+    if (this.keys.length >= this.maxSize) {
+      const oldestKey = this.keys.shift(); // Remove first (oldest) key
+      this.map.delete(oldestKey);
+    }
+
+    // Add new entry
+    this.map.set(key, value);
+    this.keys.push(key);
+  }
+
+  get(key) {
+    return this.map.get(key);
+  }
+
+  has(key) {
+    return this.map.has(key);
+  }
+
+  size() {
+    return this.map.size;
+  }
+
+  clear() {
+    this.map.clear();
+    this.keys = [];
+  }
+}
+
+const searchCache = new LimitedMap(5);
 
 app.get("/result", async (req, res) => {
   // Helper function to add delay between requests
@@ -140,11 +191,20 @@ app.get("/result", async (req, res) => {
   const artist = req.query.artist;
   const objectMatter = req.query.objectMatter;
   const department = req.query.department;
+
+  // Validate department is a number
+  if (department && isNaN(Number(department))) {
+    return res.status(400).send('Invalid department');
+  }
+
   const body = {
     "artist" : artist,
     "objectMatter" : objectMatter,
     "department" : department
   };
+
+  // Create a unique cache key from search parameters
+  const cacheKey = JSON.stringify({ artist, objectMatter, department });
 
   const page = parseInt(req.query.page) || 1;
   const perPage = 8;
@@ -166,18 +226,34 @@ app.get("/result", async (req, res) => {
   var minResults;
   var total;
 
-  try {
-    const { data } = await axios.get(apiUrl);
-    objectIDs = data.objectIDs;
-    minResults = data.total; // Used for dynamic pagination
-    total = data.total;
+  if (searchCache.has(cacheKey)) {
+    const cached = searchCache.get(cacheKey);
+    objectIDs = cached.objectIDs;
+    minResults = cached.minResults;
+    total = cached.total;
+  } else {
 
-    if (total > maxResults) {
-      objectIDs = objectIDs.slice(0, maxResults * 3); // Back up triple the needed results in case of error
-      minResults = maxResults;
+    try {
+      const { data } = await axios.get(apiUrl);
+      objectIDs = data.objectIDs;
+      minResults = data.total;
+      total = data.total;
+
+      if (total > maxResults) {
+        objectIDs = objectIDs.slice(0, maxResults * 3);
+        minResults = maxResults;
+      }
+
+      // Store in cache
+      searchCache.set(cacheKey, {
+        objectIDs: objectIDs,
+        minResults: minResults,
+        total: total
+      });
+
+    } catch (error) {
+      return res.render("resultNoResult.ejs", { departments: departments });
     }
-  } catch (error) {
-    return res.render("resultNoResult.ejs", { departments: departments });
   }
 
   var objectUrl;
@@ -228,7 +304,7 @@ app.get("/result", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Listening on port ${port}`);
+  console.log(`Listening... `);
 });
 
 // The following code is created to tackle with the interesting search algorithm the api has.
@@ -240,26 +316,17 @@ function generateFilters (body) {
 
   // Artist is most important. Will be added to the keywords as long as input exists.
   if (body.artist != "") {
-    keywords += ("&q=" + body.artist);
+    keywords += ("&q=" + encodeURIComponent(body.artist));
     ifInput = true;
   }
 
   // Then comes object matter
   if (body.objectMatter != "") {
     if (!ifInput) {
-      keywords += ("&q=" + body.objectMatter);
+      keywords += ("&q=" +  encodeURIComponent(body.objectMatter));
       ifInput = true;
     }
   }
-
-  // Then comes department
-  if (body.department != "") {
-    if (!ifInput) {
-      keywords += ("&departmentId=" + body.department);
-      ifInput = true;
-    }
-  }
-
   // If there's completely no input, will search with "a" to broaden the range
   if (ifInput === false) {
     keywords += "&q=a";
@@ -275,4 +342,6 @@ class Image {
     this.artistDisplayName = artistDisplayName || "Artist data missing";
   }
 }
+
+
 
