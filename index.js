@@ -135,9 +135,19 @@ app.get("/search", (req, res) => {
   res.render("search.ejs", data); // Render a search form
 });
 
-// Used to store queried objectIDs so that they can be directly fetched from here rather than queried again
-class LimitedMap {
-  constructor(maxSize = 5) {
+/* 
+The following cache is used to store queried objectIDs (array of objectIds) 
+so that they can be directly fetched from here rather than queried again. 
+An instance of this class always exists on the server. 
+The map structure in it is:
+
+cacheKey: { objectIDs: [], images:[], minResults: int, total: int }
+
+cacheKey is mapped to a group of search params (department, artist, object 
+item).
+ */
+class ObjectIdsArrayCache {
+  constructor(maxSize = 8) {
     this.maxSize = maxSize;
     this.map = new Map();
     this.keys = []; // Track insertion order
@@ -179,24 +189,37 @@ class LimitedMap {
   }
 }
 
-const searchCache = new LimitedMap(5);
+class Image {
+  constructor(primaryImageSmall, title, artistDisplayName) {
+    this.primaryImageSmall = primaryImageSmall || "/images/defaultImage.jpg";
+    this.title = title || "Title data missing";
+    this.artistDisplayName = artistDisplayName || "Artist data missing";
+  }
+}
+
+const objectIdsArrayCache = new ObjectIdsArrayCache();
 
 app.get("/result", async (req, res) => {
   // Helper function to add delay between requests
-  // const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
   
+  // Get search params from req.query
   const artist = req.query.artist;
   const objectMatter = req.query.objectMatter;
   const department = req.query.department;
+  const page = parseInt(req.query.page) || 1;
+  // Other params set by developer
+  const perPage = 6;
+  const maxResults = 60;
 
   // Validate department is a number
   if (department && isNaN(Number(department))) {
     return res.status(400).send('Invalid department');
   }
 
+  // Construct a body with search params
   const body = {
     "artist" : artist,
     "objectMatter" : objectMatter,
@@ -206,28 +229,29 @@ app.get("/result", async (req, res) => {
   // Create a unique cache key from search parameters
   const cacheKey = JSON.stringify({ artist, objectMatter, department });
 
-  const page = parseInt(req.query.page) || 1;
-  const perPage = 8;
-  const maxResults = 80;
-
   var searchEndPoint;
-  // If department is specified, use the objects endpoint with departmentIds
+  // Construct searchEndPoint
+  // If department is specified, use the API objects endpoint with departmentIds,
+  // as its search endpoint doesn't support departmentId search 
   if (department && department !== "") {
-    searchEndPoint = `/public/collection/v1/objects?departmentIds=${department}`;
+    searchEndPoint = `/public/collection/v1/search?departmentId=${department}&hasImages=true`;
   } else {
-    // Otherwise use the search endpoint
+    // Otherwise use the API's search endpoint with hasImages=true condition
     searchEndPoint = "/public/collection/v1/search?hasImages=true";
-    searchEndPoint += generateFilters(body);
   }
+  searchEndPoint += generateFilters(body);
 
   const apiUrl = API_URL + searchEndPoint;
   const objectEndpoint = API_URL + "/public/collection/v1/objects/";
+
+  // Prepare var containers
   var objectIDs;
-  var minResults;
+  var minResults; // =min(maxResults, total)
   var total;
 
-  if (searchCache.has(cacheKey)) {
-    const cached = searchCache.get(cacheKey);
+  // Get objectIDs from cache first, if not there, fetch from API
+  if (objectIdsArrayCache.has(cacheKey)) {
+    const cached = objectIdsArrayCache.get(cacheKey);
     objectIDs = cached.objectIDs;
     minResults = cached.minResults;
     total = cached.total;
@@ -240,12 +264,12 @@ app.get("/result", async (req, res) => {
       total = data.total;
 
       if (total > maxResults) {
-        objectIDs = objectIDs.slice(0, maxResults * 3);
+        objectIDs = objectIDs.slice(0, maxResults * 2); // Save more objects than required in case of skipping
         minResults = maxResults;
       }
 
       // Store in cache
-      searchCache.set(cacheKey, {
+      objectIdsArrayCache.set(cacheKey, {
         objectIDs: objectIDs,
         minResults: minResults,
         total: total
@@ -256,22 +280,29 @@ app.get("/result", async (req, res) => {
     }
   }
 
+  // Fetch images page by page and store them in images[]
   var objectUrl;
-  var images = [];
   var objectIndex = perPage * (page - 1);
-  
+  var images = [];
+  const fetchStart = Date.now();
+  const FETCH_TIMEOUT_MS = 8000;
+
   while (images.length < perPage) {
-    
-    // To prevent overflow of index 
-    if (objectIndex === objectIDs.length - 1) {
-      return res.status(404).send("Unknown error");
+
+    if (Date.now() - fetchStart > FETCH_TIMEOUT_MS) {
+      return res.status(503).send("Request timed out. Please try again after a while.");
+    }
+
+    // To prevent overflow of index
+    if (objectIndex >= objectIDs.length) {
+      return res.status(404).send("Request failed");
     }
 
     try {
       objectUrl = objectEndpoint + objectIDs[objectIndex];
       
       // Add delay between requests
-      await delay(40);
+      await delay(100);
       
       const { data } = await axios.get(objectUrl);
       
@@ -283,6 +314,16 @@ app.get("/result", async (req, res) => {
       
     } catch (error) {
       console.error(`Error fetching object ${objectIDs[objectIndex]}: ${error.message} , skipping...`);
+      // Request too frequently, delay for 3 sec
+      if (error.message.includes(403)) {
+        await delay(3000);
+      }
+
+      // Object is not found on API collection, use fallback
+      if (error.message.includes(404)) {
+        const image = new Image("/images/defaultImage.jpg", "Data missing", "Data missing");
+        images.push(image);
+      }
     }
     
     objectIndex++;
@@ -335,13 +376,7 @@ function generateFilters (body) {
   return keywords;
 }
 
-class Image {
-  constructor(primaryImageSmall, title, artistDisplayName) {
-    this.primaryImageSmall = primaryImageSmall || "/images/defaultImage.jpg";
-    this.title = title || "Title data missing";
-    this.artistDisplayName = artistDisplayName || "Artist data missing";
-  }
-}
+
 
 
 

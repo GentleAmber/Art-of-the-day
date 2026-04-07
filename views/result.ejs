@@ -32,12 +32,12 @@
         </div>
 
         <% if (total > max) { %>
-          <p>Due to the nature of this demo project, results are limited to <%= max%> items:</p>
+          <p>Due to the nature of this demo project, results are capped to <%= max%> items:</p>
         <% } else { %>
           <p>There are <%= total%> results:</p>
         <% }%>
 
-        <div class="row row-cols-2 row-cols-lg-4 g-3">
+        <div class="row row-cols-2 row-cols-lg-3 g-3">
           <% images.forEach(img=> { %>
             <div class="col">
               <div class="card shadow-sm h-100">
